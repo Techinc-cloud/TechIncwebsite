@@ -9,7 +9,7 @@ import json
 from html import escape
 
 import frappe
-from frappe.utils import add_days, today
+from frappe.utils import add_days, now_datetime, today
 
 from techinc_website import __version__
 from techinc_website.validation import VERSION, assessment, contact, fingerprint, text
@@ -155,14 +155,8 @@ def _save(data, settings):
     for answer in data.get('answers', []):
         doc.append('answers', answer)
     doc.save(ignore_permissions=True)
-    # A timeline link is visible in the lead's native UI. User text is escaped.
-    label = 'Website assessment' if data['kind'] == 'assessment' else 'Website enquiry'
-    summary = f'{label}: {escape(data["name"])}'
-    if data['kind'] == 'assessment':
-        summary += f' — {data["score"]}/100 ({escape(data["band"])})'
-    content = f'<p>{summary}</p><p><a href="/app/website-submission-ti/{key}">View full submission</a></p>'
-    frappe.get_doc({'doctype': 'Comment', 'comment_type': 'Comment', 'reference_doctype': dt,
-                    'reference_name': lead, 'content': content}).insert(ignore_permissions=True)
+    summary, content = _build_lead_notes(data, key)
+    _attach_lead_notes(dt, lead, summary, content)
     if settings.default_assignee:
         frappe.get_doc({'doctype': 'ToDo', 'allocated_to': settings.default_assignee,
                         'assigned_by': frappe.session.user, 'reference_type': SUBMISSION, 'reference_name': key,
@@ -174,6 +168,125 @@ def _save(data, settings):
                         'document_type': SUBMISSION, 'document_name': key,
                         'subject': summary}).insert(ignore_permissions=True)
     return _response(doc, data['kind'])
+
+
+def _build_lead_notes(data, key):
+    kind = data.get('kind', 'contact')
+    name = escape(data.get('name') or '')
+    org = escape(data.get('organization') or '')
+
+    if kind == 'assessment':
+        score = data.get('score', 0)
+        band = escape(data.get('band') or '')
+        summary = f'Website assessment: {name} — {score}/100 ({band})'
+        body = f'<p><strong>{summary}</strong></p>'
+        if org:
+            body += f'<p><strong>Organisation:</strong> {org}</p>'
+        answers = data.get('answers') or []
+        if answers:
+            items = ''.join(
+                f'<li><strong>{escape(str(a.get("question", "")))}:</strong> {escape(str(a.get("answer", "")))}</li>'
+                for a in answers
+            )
+            body += f'<ol>{items}</ol>'
+    elif kind == 'ticket':
+        subject = escape(data.get('subject') or 'Support Ticket')
+        priority = escape(data.get('priority') or 'Medium')
+        category = escape(data.get('category') or 'General')
+        desc = escape(data.get('description') or data.get('message') or '').replace('\n', '<br>')
+        summary = f'Website ticket: {subject} ({priority})'
+        body = (
+            f'<p><strong>Website Support Ticket: {subject}</strong></p>'
+            f'<p><strong>Priority:</strong> {priority} | <strong>Category:</strong> {category}</p>'
+            f'<div style="background:#f4f5f7;padding:10px;border-left:3px solid #0052cc;margin:8px 0;">{desc}</div>'
+        )
+    else:
+        label = 'Website consultation' if kind == 'consultation' else 'Website enquiry'
+        interest = escape(data.get('interest') or '')
+        industry = escape(data.get('industry') or '')
+        employees = escape(data.get('employees') or '')
+        phone = escape(data.get('phone') or '')
+        msg = escape(data.get('message') or '').replace('\n', '<br>')
+        summary = f'{label}: {name}'
+        parts = []
+        if interest:
+            parts.append(f'<strong>Interest:</strong> {interest}')
+        if org:
+            org_desc = org
+            if industry or employees:
+                details = ', '.join(filter(None, [industry, f'{employees} employees' if employees else '']))
+                org_desc += f' ({details})'
+            parts.append(f'<strong>Organisation:</strong> {org_desc}')
+        if phone:
+            parts.append(f'<strong>Phone:</strong> {phone}')
+        info_html = ('<p>' + '<br>'.join(parts) + '</p>') if parts else ''
+        msg_html = (
+            f'<div style="background:#f4f5f7;padding:10px;border-left:3px solid #0052cc;margin:8px 0;">'
+            f'<strong>Message / Notes:</strong><br>{msg}</div>'
+        ) if msg else ''
+        body = f'<p><strong>{label} from {name}</strong></p>{info_html}{msg_html}'
+
+    content = f'{body}<p><a href="/app/website-submission-ti/{key}">View full submission in desk</a></p>'
+    return summary, content
+
+
+def _attach_lead_notes(dt, lead, summary, content):
+    """Ensure the enquiry notes appear in both the Lead timeline and native CRM notes."""
+    frappe.get_doc({
+        'doctype': 'Comment',
+        'comment_type': 'Comment',
+        'reference_doctype': dt,
+        'reference_name': lead,
+        'content': content,
+    }).insert(ignore_permissions=True)
+
+    try:
+        meta = frappe.get_meta(dt)
+        notes_field = meta.get_field('notes')
+        lead_doc = frappe.get_doc(dt, lead)
+        saved = False
+
+        if notes_field:
+            if notes_field.fieldtype == 'Table':
+                child_meta = frappe.get_meta(notes_field.options)
+                note_row = {}
+                if child_meta.has_field('note'):
+                    note_row['note'] = content
+                elif child_meta.has_field('content'):
+                    note_row['content'] = content
+                if child_meta.has_field('added_by'):
+                    note_row['added_by'] = frappe.session.user or 'Administrator'
+                if child_meta.has_field('added_on'):
+                    note_row['added_on'] = now_datetime()
+                lead_doc.append('notes', note_row)
+                saved = True
+            elif notes_field.fieldtype in ('Small Text', 'Text', 'Long Text', 'Text Editor', 'Data'):
+                existing_notes = (lead_doc.get('notes') or '').strip()
+                lead_doc.notes = f"{existing_notes}\n\n{content}".strip() if existing_notes else content
+                saved = True
+
+        if meta.has_field('qualification_status') and not lead_doc.get('qualification_status'):
+            lead_doc.qualification_status = summary
+            saved = True
+
+        if saved:
+            lead_doc.save(ignore_permissions=True)
+        elif frappe.db.exists('DocType', 'CRM Note'):
+            crm_meta = frappe.get_meta('CRM Note')
+            if not crm_meta.istable:
+                note_doc = {'doctype': 'CRM Note'}
+                if crm_meta.has_field('lead'):
+                    note_doc['lead'] = lead
+                if crm_meta.has_field('parent') and crm_meta.has_field('parenttype'):
+                    note_doc['parent'] = lead
+                    note_doc['parenttype'] = dt
+                if crm_meta.has_field('note'):
+                    note_doc['note'] = content
+                elif crm_meta.has_field('content'):
+                    note_doc['content'] = content
+                frappe.get_doc(note_doc).insert(ignore_permissions=True)
+    except Exception:
+        pass
 
 
 def _helpdesk_ticket(data, lead):
@@ -258,3 +371,33 @@ def record_event(website_secret=None, **data):
     frappe.get_doc({'doctype': 'Website Event TI', 'event_type': event,
                     'visitor_session': fields.pop('session'), 'meta_json': encoded, **fields}).insert(ignore_permissions=True)
     return {'ok': True, 'stored': True}
+
+
+@frappe.whitelist(methods=['GET', 'POST'])
+def list_submissions(website_secret=None, limit=50):
+    _authorize(website_secret)
+    docs = frappe.get_all(
+        SUBMISSION,
+        fields=[
+            'name', 'kind', 'status', 'full_name', 'email', 'phone', 'organization',
+            'industry', 'employees', 'interest', 'message', 'subject', 'description',
+            'priority', 'category', 'helpdesk_ticket', 'follow_up_notes', 'lead_doctype',
+            'lead', 'score', 'band', 'page', 'creation', 'modified'
+        ],
+        order_by='creation desc',
+        limit=int(limit)
+    )
+    return docs
+
+
+@frappe.whitelist(methods=['POST'])
+def update_submission(name, status=None, follow_up_notes=None, website_secret=None):
+    _authorize(website_secret)
+    doc = frappe.get_doc(SUBMISSION, name)
+    if status and status in ('New', 'In Progress', 'Closed'):
+        doc.status = status
+    if follow_up_notes is not None:
+        doc.follow_up_notes = follow_up_notes
+    doc.save(ignore_permissions=True)
+    return {'ok': True, 'name': doc.name, 'status': doc.status, 'follow_up_notes': doc.follow_up_notes}
+

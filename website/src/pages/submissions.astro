@@ -1,0 +1,20 @@
+---
+import SubmissionsDesk from '@/components/islands/SubmissionsDesk'
+import '@/styles/desk.css'
+
+export const prerender = false
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Submissions & Enquiries Desk | Techinc</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body class="desk-page">
+    <SubmissionsDesk client:load />
+  </body>
+</html>

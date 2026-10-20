@@ -224,3 +224,40 @@ export interface AnalyticsPayload {
 
 export const submitAnalytics = (p: AnalyticsPayload) =>
   callMethod<{ ok: boolean }>(`${APP}.record_event`, p, { timeoutMs: 3000 })
+
+export interface SubmissionRecord {
+  name: string
+  kind: 'contact' | 'consultation' | 'assessment' | 'ticket'
+  status: 'New' | 'In Progress' | 'Closed'
+  full_name: string
+  email: string
+  phone?: string
+  organization?: string
+  industry?: string
+  employees?: string
+  interest?: string
+  message?: string
+  subject?: string
+  description?: string
+  priority?: 'Low' | 'Medium' | 'High' | 'Urgent'
+  category?: string
+  helpdesk_ticket?: string
+  follow_up_notes?: string
+  lead_doctype?: string
+  lead?: string
+  score?: number
+  band?: string
+  page?: string
+  creation?: string
+  modified?: string
+}
+
+export const listSubmissions = (limit = 50) =>
+  callMethod<SubmissionRecord[]>(`${APP}.list_submissions`, { limit })
+
+export const updateSubmission = (name: string, status?: string, follow_up_notes?: string) =>
+  callMethod<{ ok: boolean; name: string; status: string; follow_up_notes: string }>(
+    `${APP}.update_submission`,
+    { name, status, follow_up_notes },
+  )
+

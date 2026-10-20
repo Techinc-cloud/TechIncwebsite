@@ -4,38 +4,70 @@
   "module": "Techinc Website",
   "engine": "InnoDB",
   "field_order": [
+    "sec_contact",
     "kind",
+    "status",
     "full_name",
     "email",
     "phone",
+    "col_contact",
     "organization",
     "industry",
     "employees",
     "interest",
+    "sec_message",
     "message",
-    "status",
-    "follow_up_notes",
-    "lead_doctype",
-    "lead",
+    "sec_ticket",
+    "subject",
+    "priority",
+    "col_ticket",
+    "category",
+    "helpdesk_ticket",
+    "sec_ticket_desc",
+    "description",
+    "sec_assessment",
     "score",
     "band",
+    "col_assessment",
     "assessment_version",
+    "sec_answers",
     "answers",
+    "sec_follow_up",
+    "follow_up_notes",
+    "col_crm",
+    "lead_doctype",
+    "lead",
+    "sec_technical",
     "page",
     "referrer",
+    "col_tech",
     "visitor_session",
     "submission_id",
     "payload_hash"
   ],
   "fields": [
     {
+      "fieldname": "sec_contact",
+      "label": "Submission & Contact Details",
+      "fieldtype": "Section Break"
+    },
+    {
       "fieldname": "kind",
       "label": "Type",
       "fieldtype": "Select",
-      "options": "contact\nconsultation\nassessment",
+      "options": "contact\nconsultation\nassessment\nticket",
       "in_list_view": 1,
       "in_standard_filter": 1,
       "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "label": "Follow-up status",
+      "fieldtype": "Select",
+      "options": "New\nIn Progress\nClosed",
+      "default": "New",
+      "in_list_view": 1,
+      "in_standard_filter": 1
     },
     {
       "fieldname": "full_name",
@@ -57,6 +89,10 @@
       "label": "Phone",
       "fieldtype": "Data",
       "read_only": 1
+    },
+    {
+      "fieldname": "col_contact",
+      "fieldtype": "Column Break"
     },
     {
       "fieldname": "organization",
@@ -84,57 +120,121 @@
       "read_only": 1
     },
     {
+      "fieldname": "sec_message",
+      "label": "Enquiry Notes & Message",
+      "fieldtype": "Section Break",
+      "depends_on": "eval:doc.message"
+    },
+    {
       "fieldname": "message",
-      "label": "Message",
+      "label": "Tell us what is going on (Enquiry Notes)",
       "fieldtype": "Long Text",
       "read_only": 1
     },
     {
-    "fieldname": "status",
-      "label": "Follow-up status",
+      "fieldname": "sec_ticket",
+      "label": "Support Ticket Details",
+      "fieldtype": "Section Break",
+      "depends_on": "eval:doc.kind=='ticket' || doc.subject || doc.helpdesk_ticket"
+    },
+    {
+      "fieldname": "subject",
+      "label": "Subject",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "priority",
+      "label": "Priority",
       "fieldtype": "Select",
-      "options": "New\nIn Progress\nClosed",
-    "default": "New",
-    "in_list_view": 1,
-    "in_standard_filter": 1
-   },
-   {
-    "fieldname": "subject",
-    "label": "Subject",
-    "fieldtype": "Data",
-    "in_list_view": 1,
-    "read_only": 1
-   },
-   {
-    "fieldname": "description",
-    "label": "Description",
-    "fieldtype": "Long Text",
-    "read_only": 1
-   },
-   {
-    "fieldname": "priority",
-    "label": "Priority",
-    "fieldtype": "Select",
-    "options": "Low\nMedium\nHigh\nUrgent",
-    "read_only": 1
-   },
-   {
-    "fieldname": "category",
-    "label": "Category",
-    "fieldtype": "Data",
-    "read_only": 1
-   },
-   {
-    "fieldname": "helpdesk_ticket",
-    "label": "Helpdesk Ticket",
-    "fieldtype": "Data",
-    "in_list_view": 1,
-    "read_only": 1
-   },
+      "options": "Low\nMedium\nHigh\nUrgent",
+      "read_only": 1
+    },
+    {
+      "fieldname": "col_ticket",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "category",
+      "label": "Category",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "helpdesk_ticket",
+      "label": "Helpdesk Ticket",
+      "fieldtype": "Data",
+      "in_list_view": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "sec_ticket_desc",
+      "label": "Ticket Description",
+      "fieldtype": "Section Break",
+      "depends_on": "eval:doc.description"
+    },
+    {
+      "fieldname": "description",
+      "label": "Description",
+      "fieldtype": "Long Text",
+      "read_only": 1
+    },
+    {
+      "fieldname": "sec_assessment",
+      "label": "Assessment Results",
+      "fieldtype": "Section Break",
+      "depends_on": "eval:doc.kind=='assessment' || doc.score"
+    },
+    {
+      "fieldname": "score",
+      "label": "Readiness score",
+      "fieldtype": "Int",
+      "read_only": 1
+    },
+    {
+      "fieldname": "band",
+      "label": "Readiness band",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "col_assessment",
+      "fieldtype": "Column Break"
+    },
+    {
+      "fieldname": "assessment_version",
+      "label": "Assessment version",
+      "fieldtype": "Data",
+      "read_only": 1
+    },
+    {
+      "fieldname": "sec_answers",
+      "label": "Assessment Answers",
+      "fieldtype": "Section Break",
+      "depends_on": "eval:doc.answers && doc.answers.length > 0"
+    },
+    {
+      "fieldname": "answers",
+      "label": "Assessment answers",
+      "fieldtype": "Table",
+      "options": "Website Answer TI",
+      "read_only": 1
+    },
+    {
+      "fieldname": "sec_follow_up",
+      "label": "Sales Follow-up & CRM Notes",
+      "fieldtype": "Section Break"
+    },
     {
       "fieldname": "follow_up_notes",
       "label": "Follow-up notes",
       "fieldtype": "Small Text"
+    },
+    {
+      "fieldname": "col_crm",
+      "fieldtype": "Column Break"
     },
     {
       "fieldname": "lead_doctype",
@@ -151,30 +251,10 @@
       "read_only": 1
     },
     {
-      "fieldname": "score",
-      "label": "Readiness score",
-      "fieldtype": "Int",
-      "read_only": 1
-    },
-    {
-      "fieldname": "band",
-      "label": "Readiness band",
-      "fieldtype": "Data",
-      "read_only": 1,
-      "in_list_view": 1
-    },
-    {
-      "fieldname": "assessment_version",
-      "label": "Assessment version",
-      "fieldtype": "Data",
-      "read_only": 1
-    },
-    {
-      "fieldname": "answers",
-      "label": "Assessment answers",
-      "fieldtype": "Table",
-      "options": "Website Answer TI",
-      "read_only": 1
+      "fieldname": "sec_technical",
+      "label": "Technical Metadata",
+      "fieldtype": "Section Break",
+      "collapsible": 1
     },
     {
       "fieldname": "page",
@@ -187,6 +267,10 @@
       "label": "Referrer",
       "fieldtype": "Small Text",
       "read_only": 1
+    },
+    {
+      "fieldname": "col_tech",
+      "fieldtype": "Column Break"
     },
     {
       "fieldname": "visitor_session",
