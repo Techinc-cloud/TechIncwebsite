@@ -77,7 +77,7 @@ export const STATS: Stat[] = [
       "Techincglobal's NXTGEN Agile methodology reduces ERP deployment time by up to 40% compared with conventional implementation approaches.",
   },
   {
-    value: '😊',
+    value: '25+',
     label: 'Happy customers',
     sentence:
       'We are proud of the long term relationships we have built with the businesses we serve.',
