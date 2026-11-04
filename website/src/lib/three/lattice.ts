@@ -80,7 +80,10 @@ export function startLattice(mount: HTMLElement, count: number): Lattice | null 
   })
   let { w, h } = size()
 
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2))
+  const mem = (navigator as { deviceMemory?: number }).deviceMemory
+  const cores = navigator.hardwareConcurrency ?? 4
+  const isWeak = cores <= 4 || (mem !== undefined && mem <= 4)
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isWeak ? 1.25 : 2))
   renderer.setSize(w, h, false)
   renderer.outputColorSpace = SRGBColorSpace
   renderer.shadowMap.enabled = true
@@ -99,7 +102,7 @@ export function startLattice(mount: HTMLElement, count: number): Lattice | null 
   const key = new DirectionalLight(0xffffff, 2.3)
   key.position.set(-16, 26, 14)
   key.castShadow = true
-  key.shadow.mapSize.set(1024, 1024)
+  key.shadow.mapSize.set(isWeak ? 512 : 1024, isWeak ? 512 : 1024)
   const s = 20
   key.shadow.camera.left = -s
   key.shadow.camera.right = s

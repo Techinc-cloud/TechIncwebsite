@@ -505,6 +505,7 @@ html.no-js [data-reveal] {
   html:not(.no-js) [data-reveal] {
     opacity: 0;
     transform: translateY(1rem);
+    will-change: opacity, transform;
     transition:
       opacity var(--dur-slow) var(--ease-out),
       transform var(--dur-slow) var(--ease-out);
@@ -514,6 +515,7 @@ html.no-js [data-reveal] {
   html:not(.no-js) [data-reveal].is-in {
     opacity: 1;
     transform: none;
+    will-change: auto;
   }
 }
 

@@ -173,25 +173,21 @@ function detect(): Capability {
     const cores = navigator.hardwareConcurrency ?? 4
     const mem = (navigator as { deviceMemory?: number }).deviceMemory
     const coarse = matchMedia('(pointer: coarse)').matches
-    const weak = cores <= 4 || (mem !== undefined && mem <= 4)
+    const ultraLow = cores <= 2 || (mem !== undefined && mem <= 2)
+    const weak = !ultraLow && (cores <= 4 || (mem !== undefined && mem <= 4))
 
     return {
       ok: true,
-      shadows: true,
-      // A 4k map over a 900-unit shadow frustum is about 0.22 units per texel,
-      // which is enough for a crisp contact edge under a 10-unit building.
-      shadowSize: weak ? 1024 : coarse ? 2048 : 4096,
-      bloom: !weak,
-      dots: !weak,
-      scatter: !weak,
-      // The crowd is the single most valuable animated layer and the cheapest
-      // (one draw call), so it survives on weak hardware; traffic does not.
-      crowd: true,
-      traffic: !weak,
-      flock: !weak,
-      // Above 2 costs 2.25x the fill for a difference nobody can see.
-      maxDpr: weak ? 1.25 : coarse ? 1.75 : 2,
-      msaa: weak ? 0 : 4,
+      shadows: !ultraLow,
+      shadowSize: ultraLow ? 512 : weak ? 1024 : coarse ? 2048 : 4096,
+      bloom: false, // disabled on all tiers — cost vs visual return is poor on commodity GPUs
+      dots: !weak && !ultraLow,
+      scatter: !weak && !ultraLow,
+      crowd: !ultraLow,
+      traffic: !weak && !ultraLow,
+      flock: !weak && !ultraLow,
+      maxDpr: ultraLow ? 1.0 : weak ? 1.25 : coarse ? 1.75 : 2,
+      msaa: ultraLow ? 0 : weak ? 0 : 4,
     }
   } catch {
     return fail
@@ -316,7 +312,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
     // removes peter-panning on the many near-vertical facades here.
     key.shadow.bias = -0.0002
     key.shadow.normalBias = 0.45
-    key.shadow.radius = 4
+    key.shadow.radius = cap.maxDpr <= 1.25 ? 2 : 4
   }
   scene.add(key)
   scene.add(key.target)
@@ -382,12 +378,13 @@ export function startJourney(mount: HTMLElement): Journey | null {
       accent: d.accent,
     })),
     cap.dots,
+    cap.dots ? 170 : 60,
   )
   world.add(conduits.group)
 
   const ascent = buildAscent()
   world.add(ascent.group)
-  const ramps = buildAscentRamps(ascent.anchors)
+  const ramps = buildAscentRamps(ascent.anchors, cap.dots ? 70 : 30)
   world.add(ramps.group)
 
   const scatter = cap.scatter ? buildScatter(DISTRICTS) : null
@@ -404,7 +401,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
         ...DISTRICTS.map((d) => ({
           at: d.at,
           radius: d.radius,
-          count: d.crowd,
+          count: cap.dots ? d.crowd : Math.ceil(d.crowd * 0.5),
           seed: d.seed,
         })),
         // Outposts get their crowds only where the scatter budget allows, since

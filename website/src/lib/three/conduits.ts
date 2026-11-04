@@ -149,6 +149,7 @@ export function buildConduits(
   coreAnchor: Vector3,
   districts: { key: string; anchor: Vector3; accent: number }[],
   withDots = true,
+  tubeSegments = 170,
 ): BuiltConduits {
   const group = new Group()
   group.name = 'conduits'
@@ -160,7 +161,7 @@ export function buildConduits(
     const bow = (i % 2 === 0 ? 1 : -1) * (0.65 + (i % 3) * 0.22)
     const curve = routeCurve(coreAnchor, d.anchor, bow)
 
-    const geo = new TubeGeometry(curve, 170, 0.6, 8, false)
+    const geo = new TubeGeometry(curve, tubeSegments, 0.6, 8, false)
     const material = makeConduitMaterial()
     const mesh = new Mesh(geo, material)
     mesh.frustumCulled = false
@@ -219,7 +220,7 @@ export interface BuiltRamps {
  * the camera climbs — so the methodology reads as phases handing off to each
  * other rather than as five separate boxes.
  */
-export function buildAscentRamps(anchors: Vector3[]): BuiltRamps {
+export function buildAscentRamps(anchors: Vector3[], rampSegments = 70): BuiltRamps {
   const group = new Group()
   group.name = 'ramps'
   const links: { material: ShaderMaterial; dispose(): void }[] = []
@@ -231,7 +232,7 @@ export function buildAscentRamps(anchors: Vector3[]): BuiltRamps {
     const mid = from.clone().lerp(to, 0.5).add(new Vector3(0, 7, 0))
     const curve = new CatmullRomCurve3([from, mid, to], false, 'centripetal', 0.5)
 
-    const geo = new TubeGeometry(curve, 70, 0.55, 8, false)
+    const geo = new TubeGeometry(curve, rampSegments, 0.55, 8, false)
     const material = makeConduitMaterial()
     material.uniforms.uPulses!.value = 1.5
     material.uniforms.uGain!.value = 1.3
