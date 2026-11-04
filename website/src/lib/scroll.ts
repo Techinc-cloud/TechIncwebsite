@@ -11,6 +11,7 @@
  */
 
 import Lenis from 'lenis'
+import { prefersLightweightExperience } from './performance'
 import { gsap } from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 
@@ -31,10 +32,9 @@ export function initScroll(): Lenis | null {
   if (started) return lenis
   started = true
 
-  // With reduced motion we deliberately do not instantiate Lenis at all — the
-  // browser's own instant scrolling is the correct behaviour, and ScrollTrigger
-  // falls back to reading window scroll.
-  if (prefersReducedMotion()) {
+  // Keep native scrolling on constrained hardware, touch devices, and when
+  // reduced motion is requested. This also avoids a permanent Lenis ticker.
+  if (prefersLightweightExperience()) {
     ScrollTrigger.refresh()
     return null
   }

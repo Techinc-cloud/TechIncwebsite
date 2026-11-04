@@ -123,12 +123,11 @@ const jsonld = graph(
         initCtaTracking()
       }
 
-      start()
       document.addEventListener('astro:after-swap', () => {
         window.scrollTo(0, 0)
         refreshScroll()
       })
-      document.addEventListener('astro:before-preparation', unboot)
+      document.addEventListener('astro:before-swap', unboot)
       document.addEventListener('astro:page-load', start)
     </script>
   </body>

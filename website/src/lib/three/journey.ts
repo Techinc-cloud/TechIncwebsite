@@ -168,6 +168,7 @@ function detect(): Capability {
     // scene. Better to show the static hero than to stutter through it.
     const info = gl.getExtension('WEBGL_debug_renderer_info')
     const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) ?? '') : ''
+    gl.getExtension('WEBGL_lose_context')?.loseContext()
     if (/swiftshader|llvmpipe|software|basic render/i.test(name)) return fail
 
     const cores = navigator.hardwareConcurrency ?? 4
@@ -732,8 +733,10 @@ export function startJourney(mount: HTMLElement): Journey | null {
   window.addEventListener('resize', onResize, { passive: true })
   window.addEventListener('orientationchange', onResize)
 
+  let inViewport = true
   const onVisibility = () => {
-    if (document.hidden) {
+    if (destroyed) return
+    if (document.hidden || (!inViewport && !externalCamera)) {
       gsap.ticker.remove(frame)
     } else {
       clock.getDelta()
@@ -742,6 +745,11 @@ export function startJourney(mount: HTMLElement): Journey | null {
     }
   }
   document.addEventListener('visibilitychange', onVisibility)
+  const viewportObserver = new IntersectionObserver(([entry]) => {
+    inViewport = !!entry?.isIntersecting
+    onVisibility()
+  })
+  viewportObserver.observe(mount)
 
   const onContextLost = (e: Event) => {
     e.preventDefault()
@@ -783,6 +791,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
     clearTimeout(armTimer)
     gsap.ticker.remove(frame)
     ro.disconnect()
+    viewportObserver.disconnect()
     window.removeEventListener('resize', onResize)
     window.removeEventListener('orientationchange', onResize)
     document.removeEventListener('visibilitychange', onVisibility)
@@ -826,6 +835,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
     canvas,
     takeControl(onFrame) {
       externalCamera = onFrame
+      onVisibility()
       // Explore mode has its own near plane needs: the scroll camera never gets
       // within 100 units of anything, a walking one is constantly beside walls.
       camera.near = 0.5
@@ -857,6 +867,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
         canvas,
         release() {
           externalCamera = null
+          onVisibility()
           camera.near = 1
           camera.fov = fovCurrent
           camera.updateProjectionMatrix()

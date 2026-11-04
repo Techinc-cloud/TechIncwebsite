@@ -10,6 +10,11 @@
 
 import { initScroll, refreshScroll, teardownTriggers, prefersReducedMotion } from './scroll'
 import { track } from './analytics'
+import { prefersLightweightExperience } from './performance'
+
+let booted = false
+let bootGeneration = 0
+let removeHeaderListener: (() => void) | null = null
 
 let revealObserver: IntersectionObserver | null = null
 
@@ -69,6 +74,7 @@ function initHeader(): void {
   }
   onScroll()
   window.addEventListener('scroll', onScroll, { passive: true })
+  removeHeaderListener = () => window.removeEventListener('scroll', onScroll)
 }
 
 /**
@@ -79,11 +85,12 @@ function initJourney(): void {
   const mount = document.querySelector<HTMLElement>('[data-journey]')
   if (!mount) return
 
-  if (prefersReducedMotion()) {
-    mount.setAttribute('data-journey-state', 'reduced')
+  if (prefersLightweightExperience()) {
+    mount.setAttribute('data-journey-state', 'lightweight')
     return
   }
 
+  const generation = bootGeneration
   const idle = (fn: () => void) =>
     'requestIdleCallback' in window
       ? (window as unknown as { requestIdleCallback: (cb: () => void, o?: object) => void })
@@ -92,10 +99,10 @@ function initJourney(): void {
 
   idle(() => {
     // The mount can be swapped out between scheduling and running this.
-    if (!mount.isConnected) return
+    if (!mount.isConnected || generation !== bootGeneration) return
     import('./three/journey')
       .then(({ startJourney }) => {
-        if (!mount.isConnected) return
+        if (!mount.isConnected || generation !== bootGeneration) return
         journeyStarted = true
         startJourney(mount)
       })
@@ -107,6 +114,9 @@ function initJourney(): void {
 }
 
 export function boot(): void {
+  if (booted) return
+  booted = true
+  bootGeneration++
   document.documentElement.classList.remove('no-js')
 
   initScroll()
@@ -126,6 +136,10 @@ export function boot(): void {
 }
 
 export function unboot(): void {
+  booted = false
+  bootGeneration++
+  removeHeaderListener?.()
+  removeHeaderListener = null
   revealObserver?.disconnect()
   revealObserver = null
   teardownTriggers()
