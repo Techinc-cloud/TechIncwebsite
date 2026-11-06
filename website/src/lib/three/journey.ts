@@ -44,11 +44,11 @@ import {
 } from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 
 import { gsap } from '../scroll'
+import { qualityTier, type QualityTier } from '../performance'
 import { track } from '../analytics'
 import { GradeShader } from './grade'
 import { ScrollDriver } from './scrollDriver'
@@ -133,65 +133,112 @@ let active: Journey | null = null
 
 interface Capability {
   ok: boolean
+  tier: QualityTier
   shadows: boolean
   shadowSize: number
-  bloom: boolean
+  /** Render through the EffectComposer (tone map + grade passes), or straight to the canvas. */
+  composer: boolean
   dots: boolean
   scatter: boolean
   crowd: boolean
   traffic: boolean
   flock: boolean
   maxDpr: number
+  /** Multiplier on the pixel ratio, so lite devices can render below 1:1. */
+  renderScale: number
   msaa: number
+  /** Native canvas antialiasing, for the paths that render without a composer. */
+  antialias: boolean
+  /** Minimum ms between rendered frames; 0 means every display frame. */
+  frameInterval: number
 }
 
+/**
+ * Per-tier scene and render budget.
+ *
+ * The scene is the same on every tier; what changes is what is switched on. The
+ * lite tier keeps the six districts, the core, the roads and the lit conduits —
+ * everything the story is told with — and drops everything that is atmosphere.
+ */
 function detect(): Capability {
-  const fail: Capability = {
+  const off: Capability = {
     ok: false,
+    tier: 'static',
     shadows: false,
     shadowSize: 0,
-    bloom: false,
+    composer: false,
     dots: false,
     scatter: false,
     crowd: false,
     traffic: false,
     flock: false,
     maxDpr: 1,
+    renderScale: 1,
     msaa: 0,
+    antialias: false,
+    frameInterval: 0,
   }
 
   try {
-    const gl = document.createElement('canvas').getContext('webgl2')
-    if (!gl) return fail
+    const tier = qualityTier()
+    if (tier === 'static') return off
 
-    // Software renderers report as WebGL but cannot sustain a shadow-mapped
-    // scene. Better to show the static hero than to stutter through it.
+    const gl = document.createElement('canvas').getContext('webgl2')
+    if (!gl) return off
+
+    // A software rasteriser genuinely cannot hold a 3D scene at a usable frame
+    // rate at any setting, so those go straight to the poster. Real low-end GPUs
+    // are a different matter and get the lite tier.
     const info = gl.getExtension('WEBGL_debug_renderer_info')
     const name = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) ?? '') : ''
     gl.getExtension('WEBGL_lose_context')?.loseContext()
-    if (/swiftshader|llvmpipe|software|basic render/i.test(name)) return fail
+    if (/swiftshader|llvmpipe|software|basic render/i.test(name)) return off
 
-    const cores = navigator.hardwareConcurrency ?? 4
-    const mem = (navigator as { deviceMemory?: number }).deviceMemory
-    const coarse = matchMedia('(pointer: coarse)').matches
-    const ultraLow = cores <= 2 || (mem !== undefined && mem <= 2)
-    const weak = !ultraLow && (cores <= 4 || (mem !== undefined && mem <= 4))
+    if (tier === 'lite') {
+      return {
+        ...off,
+        ok: true,
+        tier,
+        crowd: true,
+        maxDpr: 1,
+        renderScale: 0.75,
+        frameInterval: 1000 / 30,
+      }
+    }
+
+    if (tier === 'balanced') {
+      const coarse = matchMedia('(pointer: coarse)').matches
+      return {
+        ...off,
+        ok: true,
+        tier,
+        shadows: true,
+        // Rendered once and then frozen (see the end of startJourney), so the
+        // map costs one pass in total — a small one is plenty.
+        shadowSize: 1024,
+        crowd: true,
+        maxDpr: coarse ? 1.5 : 1.25,
+        antialias: true,
+      }
+    }
 
     return {
+      ...off,
       ok: true,
-      shadows: !ultraLow,
-      shadowSize: ultraLow ? 512 : weak ? 1024 : coarse ? 2048 : 4096,
-      bloom: false, // disabled on all tiers — cost vs visual return is poor on commodity GPUs
-      dots: !weak && !ultraLow,
-      scatter: !weak && !ultraLow,
-      crowd: !ultraLow,
-      traffic: !weak && !ultraLow,
-      flock: !weak && !ultraLow,
-      maxDpr: ultraLow ? 1.0 : weak ? 1.25 : coarse ? 1.75 : 2,
-      msaa: ultraLow ? 0 : weak ? 0 : 4,
+      tier,
+      shadows: true,
+      shadowSize: matchMedia('(pointer: coarse)').matches ? 2048 : 4096,
+      composer: true,
+      dots: true,
+      scatter: true,
+      crowd: true,
+      traffic: true,
+      flock: true,
+      maxDpr: 2,
+      msaa: 4,
     }
   } catch {
-    return fail
+    return off
   }
 }
 
@@ -229,11 +276,17 @@ export function startJourney(mount: HTMLElement): Journey | null {
   try {
     renderer = new WebGLRenderer({
       canvas,
-      antialias: false, // MSAA happens on the composer target instead
+      // The full tier gets MSAA on the composer's render target; the lighter
+      // tiers render straight to the canvas and use the native one.
+      antialias: cap.antialias,
       alpha: false,
-      powerPreference: 'high-performance',
+      powerPreference: cap.tier === 'full' ? 'high-performance' : 'default',
       stencil: false,
-      failIfMajorPerformanceCaveat: true,
+      // Deliberately off. With it on, any GPU the browser flags as a
+      // "performance caveat" — which is most low-end Android hardware — refuses
+      // to create a context at all and gets nothing. The frame-rate watchdog is
+      // the right judge of whether a device copes, not a blocklist.
+      failIfMajorPerformanceCaveat: false,
     })
   } catch {
     canvas.remove()
@@ -251,7 +304,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
   const measure = () => size.set(innerWidth, innerHeight)
   measure()
 
-  let dpr = Math.min(devicePixelRatio || 1, cap.maxDpr)
+  let dpr = Math.min(devicePixelRatio || 1, cap.maxDpr) * cap.renderScale
   renderer.setPixelRatio(dpr)
   renderer.setSize(size.x, size.y, false)
   renderer.outputColorSpace = SRGBColorSpace
@@ -454,28 +507,34 @@ export function startJourney(mount: HTMLElement): Journey | null {
 
   /* ---- Post chain ---- */
 
-  const target = new WebGLRenderTarget(
-    Math.max(1, Math.floor(size.x * dpr)),
-    Math.max(1, Math.floor(size.y * dpr)),
-    { type: HalfFloatType, samples: cap.msaa },
-  )
+  // Only the full tier pays for it. Tone mapping and sRGB conversion happen in
+  // the renderer itself when drawing to the canvas, so skipping the chain costs
+  // the grain, vignette and fade-in grade, and saves a half-float render target
+  // plus two full-screen passes per frame — the difference between running and
+  // not running on a tile-based mobile GPU.
+  let composer: EffectComposer | null = null
+  let target: WebGLRenderTarget | null = null
+  let grade: ShaderPass | null = null
 
-  const composer = new EffectComposer(renderer, target)
-  composer.addPass(new RenderPass(scene, camera))
+  if (cap.composer) {
+    target = new WebGLRenderTarget(
+      Math.max(1, Math.floor(size.x * dpr)),
+      Math.max(1, Math.floor(size.y * dpr)),
+      { type: HalfFloatType, samples: cap.msaa },
+    )
+    composer = new EffectComposer(renderer, target)
+    composer.addPass(new RenderPass(scene, camera))
+    composer.addPass(new OutputPass())
+    grade = new ShaderPass(GradeShader)
+    grade.uniforms.uResolution!.value = new Vector2(size.x, size.y)
+    composer.addPass(grade)
+    composer.setSize(size.x, size.y)
+  }
 
-  // Threshold above 1.0 is the whole trick: the near-white models peak just
-  // under 1.0 after tone mapping, and the conduit shader writes above it. So the
-  // conduits glow and not one roof does.
-  const bloom = new UnrealBloomPass(new Vector2(size.x, size.y), 0.5, 0.5, 1.05)
-  bloom.enabled = cap.bloom
-  composer.addPass(bloom)
-
-  composer.addPass(new OutputPass())
-
-  const grade = new ShaderPass(GradeShader)
-  grade.uniforms.uResolution!.value = new Vector2(size.x, size.y)
-  composer.addPass(grade)
-  composer.setSize(size.x, size.y)
+  const render = (): void => {
+    if (composer) composer.render()
+    else renderer.render(scene, camera)
+  }
 
   /* ---- Camera flight ---- */
 
@@ -536,32 +595,73 @@ export function startJourney(mount: HTMLElement): Journey | null {
   let externalCamera: ((dt: number) => void) | null = null
 
   const frameTimes: number[] = []
-  let degradeLevel = 0
   let watchdog = false
   // Shader compilation and shadow-map warmup always spike the first second;
   // degrading on that would be wrong.
   const armTimer = setTimeout(() => (watchdog = true), 1500)
 
-  function degrade(): void {
-    degradeLevel++
-    if (degradeLevel === 1 && bloom.enabled) {
-      bloom.enabled = false
-      return
-    }
-    if (degradeLevel === 2 && renderer.shadowMap.enabled) {
+  /** Smallest render scale the ladder will go to before giving up. */
+  const MIN_DPR = 0.5
+  /** Minimum ms between rendered frames; raised to 30fps by the ladder. */
+  let frameInterval = cap.frameInterval
+  let lastRender = 0
+
+  /**
+   * Steps a struggling device down, cheapest-to-lose first, and finally hands it
+   * to the static poster rather than leaving a slideshow.
+   *
+   * Each step returns false when it has nothing to do on this device (no shadows
+   * to drop on a tier that never had them), so the ladder skips to the next one
+   * instead of wasting a ~3 second measurement window on a no-op.
+   */
+  const ladder: (() => boolean)[] = [
+    () => {
+      if (!renderer.shadowMap.enabled) return false
       // Shadows are the most expensive thing in this scene: a second full pass
       // over every casting mesh.
       renderer.shadowMap.enabled = false
       key.castShadow = false
       SHARED_MATERIALS.forEach((m) => (m.needsUpdate = true))
-      return
-    }
-    if (degradeLevel === 3 && dpr > 1) {
-      dpr = 1
-      renderer.setPixelRatio(1)
+      return true
+    },
+    () => {
+      if (dpr <= MIN_DPR) return false
+      dpr = Math.max(MIN_DPR, dpr * 0.8)
+      renderer.setPixelRatio(dpr)
       resize()
-      return
+      return true
+    },
+    () => {
+      const layers = [crowd, traffic, flock, rotors].filter(Boolean)
+      if (!layers.length) return false
+      // The animated layers are atmosphere. Hiding the groups removes their draw
+      // calls and their per-vertex animation cost without touching the story.
+      layers.forEach((l) => (l!.group.visible = false))
+      return true
+    },
+    () => {
+      if (frameInterval >= 1000 / 30) return false
+      frameInterval = 1000 / 30
+      return true
+    },
+    () => {
+      if (dpr <= MIN_DPR) return false
+      dpr = MIN_DPR
+      renderer.setPixelRatio(dpr)
+      resize()
+      return true
+    },
+  ]
+
+  let steps = 0
+  function degrade(): void {
+    while (ladder.length) {
+      if (ladder.shift()!()) {
+        mount.setAttribute('data-journey-degrade', String(++steps))
+        return
+      }
     }
+    // Nothing left to give up. Show the poster rather than a slideshow.
     mount.setAttribute('data-journey-state', 'degraded')
     destroy()
   }
@@ -569,14 +669,25 @@ export function startJourney(mount: HTMLElement): Journey | null {
   function checkPerf(dt: number): void {
     if (!watchdog || destroyed) return
     frameTimes.push(dt)
-    if (frameTimes.length < 90) return
+    if (frameTimes.length < 60) return
     const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length
     frameTimes.length = 0
-    if (avg > 1 / 26) degrade()
+    // Judged against what was asked for: a 30fps-capped device is on target at
+    // 33ms a frame, and should only be stepped down if it misses that badly.
+    const budget = frameInterval ? (frameInterval / 1000) * 1.6 : 1 / 26
+    if (avg > budget) degrade()
   }
 
   function frame(): void {
     if (destroyed) return
+
+    // Frame cap for low-end tiers. Skipping before the clock is read means the
+    // skipped time is simply added to the next frame's dt, so nothing slows down.
+    if (frameInterval) {
+      const now = performance.now()
+      if (now - lastRender < frameInterval - 1) return
+      lastRender = now
+    }
 
     const dt = clock.getDelta()
     const elapsed = clock.getElapsedTime()
@@ -620,10 +731,12 @@ export function startJourney(mount: HTMLElement): Journey | null {
       ramps.update(1)
       rotors?.update(elapsed)
       fade = Math.min(1, fade + dt * 0.9)
-      grade.uniforms.uTime!.value = elapsed
-      grade.uniforms.uSpeed!.value = 0
-      grade.uniforms.uFade!.value = fade
-      composer.render()
+      if (grade) {
+        grade.uniforms.uTime!.value = elapsed
+        grade.uniforms.uSpeed!.value = 0
+        grade.uniforms.uFade!.value = fade
+      }
+      render()
       checkPerf(dt)
       return
     }
@@ -703,11 +816,13 @@ export function startJourney(mount: HTMLElement): Journey | null {
     }
 
     fade = Math.min(1, fade + dt * 0.9)
-    grade.uniforms.uTime!.value = elapsed
-    grade.uniforms.uSpeed!.value = speed
-    grade.uniforms.uFade!.value = fade
+    if (grade) {
+      grade.uniforms.uTime!.value = elapsed
+      grade.uniforms.uSpeed!.value = speed
+      grade.uniforms.uFade!.value = fade
+    }
 
-    composer.render()
+    render()
     checkPerf(dt)
   }
 
@@ -719,9 +834,8 @@ export function startJourney(mount: HTMLElement): Journey | null {
     camera.aspect = size.x / Math.max(1, size.y)
     camera.updateProjectionMatrix()
     renderer.setSize(size.x, size.y, false)
-    composer.setSize(size.x, size.y)
-    bloom.setSize(size.x, size.y)
-    grade.uniforms.uResolution!.value.set(size.x, size.y)
+    composer?.setSize(size.x, size.y)
+    grade?.uniforms.uResolution!.value.set(size.x, size.y)
     driver.measure()
   }
 
@@ -769,6 +883,7 @@ export function startJourney(mount: HTMLElement): Journey | null {
   }
 
   gsap.ticker.add(frame)
+  mount.setAttribute('data-journey-tier', cap.tier)
   mount.setAttribute('data-journey-state', 'running')
 
   // The world is static and the sun is fixed, so the shadow map only needs
@@ -817,8 +932,8 @@ export function startJourney(mount: HTMLElement): Journey | null {
     skyMat.dispose()
     SHARED_MATERIALS.forEach((m) => m.dispose())
 
-    composer.dispose()
-    target.dispose()
+    composer?.dispose()
+    target?.dispose()
     renderer.dispose()
     renderer.forceContextLoss()
     canvas.remove()
@@ -859,8 +974,6 @@ export function startJourney(mount: HTMLElement): Journey | null {
         scene.fog.near = EXPLORE_FOG_NEAR
         scene.fog.far = EXPLORE_FOG_FAR
       }
-      const bloomWas = bloom.strength
-      bloom.strength = bloom.strength * 0.45
 
       return {
         camera,
@@ -875,7 +988,6 @@ export function startJourney(mount: HTMLElement): Journey | null {
             scene.fog.near = FOG_NEAR
             scene.fog.far = FOG_FAR
           }
-          bloom.strength = bloomWas
           // Re-seed the filters at the current scroll position so handing back
           // does not fly the camera across the map.
           driver.snap()

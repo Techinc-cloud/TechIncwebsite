@@ -10,7 +10,7 @@
 
 import { initScroll, refreshScroll, teardownTriggers, prefersReducedMotion } from './scroll'
 import { track } from './analytics'
-import { prefersLightweightExperience } from './performance'
+import { qualityTier } from './performance'
 
 let booted = false
 let bootGeneration = 0
@@ -85,8 +85,10 @@ function initJourney(): void {
   const mount = document.querySelector<HTMLElement>('[data-journey]')
   if (!mount) return
 
-  if (prefersLightweightExperience()) {
-    mount.setAttribute('data-journey-state', 'lightweight')
+  // Only devices that cannot run any version of the scene skip the download.
+  // Everything else gets a tier of it; see qualityTier().
+  if (qualityTier() === 'static') {
+    mount.setAttribute('data-journey-state', 'static')
     return
   }
 

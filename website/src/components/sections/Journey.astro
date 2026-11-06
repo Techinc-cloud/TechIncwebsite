@@ -194,6 +194,26 @@ import { JOURNEY, COMPANY, STATS } from '@/lib/data/company'
       radial-gradient(ellipse 90% 60% at 20% 20%, rgb(255 255 255 / 0.5), transparent 70%);
   }
 
+  /* Poster fallback.
+
+     Any state where the live scene is not running shows a pre-rendered frame of
+     the same city instead of an empty gradient: no WebGL, a software renderer,
+     reduced motion, data-saver, a device the watchdog gave up on, a lost
+     context. The selector lists the states explicitly rather than negating
+     `running`, so the image is only requested by visitors who need it. */
+  .journey:is(
+      [data-journey-state='static'],
+      [data-journey-state='unsupported'],
+      [data-journey-state='failed'],
+      [data-journey-state='degraded'],
+      [data-journey-state='lost']
+    )
+    .journey__sky {
+    background:
+      linear-gradient(180deg, rgb(238 244 251 / 0.9) 0%, rgb(238 244 251 / 0.2) 38%, transparent 62%),
+      url('/posters/hero.webp') center bottom / cover no-repeat;
+  }
+
   /* Once WebGL is up the wash is redundant. */
   .journey[data-journey-state='running'] .journey__sky {
     opacity: 0.35;
@@ -562,8 +582,7 @@ import { JOURNEY, COMPANY, STATS } from '@/lib/data/company'
 
   /* Reduced motion: no fixed layers at all, just a readable sequence. */
   @media (prefers-reduced-motion: reduce) {
-    .steps,
-    .journey__sky {
+    .steps {
       display: none;
     }
     /* Overrides the desktop `display: none` — with no camera flight, the static
